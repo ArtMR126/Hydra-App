@@ -5,10 +5,8 @@ import android.content.Context
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.*
-import android.widget.EditText
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
-import androidx.appcompat.app.AlertDialog
 
 class MainActivity : ComponentActivity() {
 
@@ -69,7 +67,7 @@ class MainActivity : ComponentActivity() {
 
     private fun injectOptimizationCode(view: WebView?) {
         val customCss = """
-            /* Увеличение кнопок управления подключениями (bal, mux, via, noise, frag, rfp) */
+            /* Увеличение кнопок управления (bal, mux, via, noise, frag, rfp) */
             .cbi-button, button, input[type='button'], .btn {
                 min-height: 40px !important;
                 min-width: 44px !important;
@@ -79,17 +77,10 @@ class MainActivity : ComponentActivity() {
                 touch-action: manipulation !important;
             }
 
-            /* Увеличение и центрирование бейджей опций */
+            /* Увеличение бейджей и статусов */
             .badge, span[class*='badge'] {
                 font-size: 13px !important;
                 padding: 5px 8px !important;
-            }
-
-            /* Делаем область зацепки для перетаскивания шире */
-            [draggable='true'], .drag-handle, tr > td:first-child {
-                touch-action: none !important;
-                user-select: none !important;
-                -webkit-user-select: none !important;
             }
 
             /* Кнопки ручного перемещения вверх/вниз */
@@ -108,7 +99,7 @@ class MainActivity : ComponentActivity() {
 
         val jsScript = """
             (function() {
-                // 1. Инъекция адаптивных мобильных стилей
+                // 1. Инъекция стилей
                 var style = document.getElementById('mobile-hydra-style');
                 if (!style) {
                     style = document.createElement('style');
@@ -117,15 +108,17 @@ class MainActivity : ComponentActivity() {
                     document.head.appendChild(style);
                 }
 
-                // 2. Внедрение кнопок 'Вверх' и 'Вниз' в модальные окна сортировки
+                // 2. Внедрение кнопок перемещения ▲ и ▼ перед элементами сортировки
                 function patchSortRows() {
                     var rows = document.querySelectorAll('.modal-dialog tr, .modal tr, table tr');
                     rows.forEach(function(row) {
                         var firstCell = row.cells ? row.cells[0] : null;
                         if (!firstCell || row.getAttribute('data-patched') === 'true') return;
                         
-                        // Проверяем наличие значка перетаскивания (::: или drag-handle)
-                        if (firstCell.innerText.includes('⋮') || firstCell.innerHTML.includes('fa-bars') || firstCell.classList.contains('drag-handle') || firstCell.innerText.trim() === '::') {
+                        var text = firstCell.innerText || '';
+                        var html = firstCell.innerHTML || '';
+                        
+                        if (text.includes('⋮') || text.includes('::') || html.includes('fa-bars') || firstCell.classList.contains('drag-handle')) {
                             row.setAttribute('data-patched', 'true');
                             
                             var upBtn = document.createElement('span');
