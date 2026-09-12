@@ -1,116 +1,170 @@
 package com.example.hydracontrol
 
+import android.annotation.SuppressLint
+import android.content.Context
 import android.os.Bundle
-import android.widget.Toast
+import android.view.ViewGroup
+import android.webkit.*
+import android.widget.EditText
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.lifecycleScope
-import com.example.hydracontrol.data.HydraRepository
-import com.example.hydracontrol.data.SessionManager
-import kotlinx.coroutines.launch
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 
 class MainActivity : ComponentActivity() {
-    private lateinit var repo: HydraRepository
-    private lateinit var sessionManager: SessionManager
 
+    private lateinit var webView: WebView
+    private val defaultUrl = "http://192.168.2.1"
+
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        sessionManager = SessionManager(applicationContext)
-        repo = HydraRepository(sessionManager)
 
-        setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    HydraControlScreen(
-                        sessionManager = sessionManager,
-                        onAddDomain = { domain ->
-                            lifecycleScope.launch {
-                                val ok = repo.addDomain(domain)
-                                val msg = if (ok) "Домен добавлен" else "Ошибка добавления (проверьте подключение)"
-                                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onSwitchServer = { serverId ->
-                            lifecycleScope.launch {
-                                val ok = repo.switchVpnServer(serverId)
-                                val msg = if (ok) "Сервер изменен: $serverId" else "Ошибка смены сервера"
-                                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
+        val prefs = getSharedPreferences("hydra_app_prefs", Context.MODE_PRIVATE)
+        val targetHost = prefs.getString("custom_url", defaultUrl) ?: defaultUrl
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun HydraControlScreen(
-    sessionManager: SessionManager,
-    onAddDomain: (String) -> Unit,
-    onSwitchServer: (String) -> Unit
-) {
-    var domainInput by remember { mutableStateOf("") }
-    var selectedServer by remember { mutableStateOf("NL-01") }
-    val servers = listOf("NL-01 (Amsterdam)", "DE-01 (Frankfurt)", "US-01 (New York)", "FIN-01 (Helsinki)")
-
-    Scaffold(
-        topBar = { TopAppBar(title = { Text("Hydra Route Quick Control") }) }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("Маршрутизация доменов", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
-                value = domainInput,
-                onValueChange = { domainInput = it },
-                label = { Text("Домен (напр. rutracker.org)") },
-                modifier = Modifier.fillMaxWidth()
+        webView = WebView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
-            Button(
-                onClick = {
-                    if (domainInput.isNotBlank()) {
-                        onAddDomain(domainInput)
-                        domainInput = ""
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Добавить в обход")
+
+            settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                databaseEnabled = true
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                setSupportZoom(true)
+                builtInZoomControls = true
+                displayZoomControls = false
+                cacheMode = WebSettings.LOAD_DEFAULT
             }
 
-            HorizontalDivider()
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
-            Text("Активный VPN Outbound", style = MaterialTheme.typography.titleMedium)
-            servers.forEach { server ->
-                val serverKey = server.substringBefore(" ")
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(server)
-                    RadioButton(
-                        selected = (selectedServer == serverKey),
-                        onClick = {
-                            selectedServer = serverKey
-                            onSwitchServer(serverKey)
-                        }
-                    )
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    injectOptimizationCode(view)
                 }
             }
+
+            webChromeClient = WebChromeClient()
         }
+
+        setContentView(webView)
+        webView.loadUrl(targetHost)
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    finish()
+                }
+            }
+        })
+    }
+
+    private fun injectOptimizationCode(view: WebView?) {
+        val customCss = """
+            /* Увеличение кнопок управления подключениями (bal, mux, via, noise, frag, rfp) */
+            .cbi-button, button, input[type='button'], .btn {
+                min-height: 40px !important;
+                min-width: 44px !important;
+                padding: 6px 12px !important;
+                font-size: 14px !important;
+                margin: 3px !important;
+                touch-action: manipulation !important;
+            }
+
+            /* Увеличение и центрирование бейджей опций */
+            .badge, span[class*='badge'] {
+                font-size: 13px !important;
+                padding: 5px 8px !important;
+            }
+
+            /* Делаем область зацепки для перетаскивания шире */
+            [draggable='true'], .drag-handle, tr > td:first-child {
+                touch-action: none !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+            }
+
+            /* Кнопки ручного перемещения вверх/вниз */
+            .mobile-order-btn {
+                display: inline-block !important;
+                padding: 4px 10px !important;
+                margin-right: 4px !important;
+                background-color: #2a3b50 !important;
+                color: #00d2ff !important;
+                border: 1px solid #00d2ff !important;
+                border-radius: 4px !important;
+                font-weight: bold !important;
+                font-size: 14px !important;
+            }
+        """.trimIndent().replace("\n", " ")
+
+        val jsScript = """
+            (function() {
+                // 1. Инъекция адаптивных мобильных стилей
+                var style = document.getElementById('mobile-hydra-style');
+                if (!style) {
+                    style = document.createElement('style');
+                    style.id = 'mobile-hydra-style';
+                    style.innerHTML = "$customCss";
+                    document.head.appendChild(style);
+                }
+
+                // 2. Внедрение кнопок 'Вверх' и 'Вниз' в модальные окна сортировки
+                function patchSortRows() {
+                    var rows = document.querySelectorAll('.modal-dialog tr, .modal tr, table tr');
+                    rows.forEach(function(row) {
+                        var firstCell = row.cells ? row.cells[0] : null;
+                        if (!firstCell || row.getAttribute('data-patched') === 'true') return;
+                        
+                        // Проверяем наличие значка перетаскивания (::: или drag-handle)
+                        if (firstCell.innerText.includes('⋮') || firstCell.innerHTML.includes('fa-bars') || firstCell.classList.contains('drag-handle') || firstCell.innerText.trim() === '::') {
+                            row.setAttribute('data-patched', 'true');
+                            
+                            var upBtn = document.createElement('span');
+                            upBtn.className = 'mobile-order-btn';
+                            upBtn.innerText = '▲';
+                            upBtn.onclick = function(e) {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                var prev = row.previousElementSibling;
+                                if (prev && prev.parentNode) {
+                                    prev.parentNode.insertBefore(row, prev);
+                                    row.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            };
+
+                            var downBtn = document.createElement('span');
+                            downBtn.className = 'mobile-order-btn';
+                            downBtn.innerText = '▼';
+                            downBtn.onclick = function(e) {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                var next = row.nextElementSibling;
+                                if (next && next.parentNode) {
+                                    next.parentNode.insertBefore(next, row);
+                                    row.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            };
+
+                            firstCell.insertBefore(downBtn, firstCell.firstChild);
+                            firstCell.insertBefore(upBtn, firstCell.firstChild);
+                        }
+                    });
+                }
+
+                patchSortRows();
+                new MutationObserver(function() { patchSortRows(); }).observe(document.body, { childList: true, subtree: true });
+            })();
+        """.trimIndent()
+
+        view?.evaluateJavascript(jsScript, null)
     }
 }
