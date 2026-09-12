@@ -1,24 +1,36 @@
 package com.example.hydracontrol
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.Context
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.*
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageButton
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
-    private val defaultUrl = "http://192.168.2.1"
+    // Порт 2000 для HydraRoute
+    private val defaultUrl = "http://192.168.2.1:2000"
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("hydra_app_prefs", Context.MODE_PRIVATE)
-        val targetHost = prefs.getString("custom_url", defaultUrl) ?: defaultUrl
+        val currentUrl = prefs.getString("custom_url", defaultUrl) ?: defaultUrl
+
+        val rootLayout = FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
 
         webView = WebView(this).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -51,8 +63,24 @@ class MainActivity : ComponentActivity() {
             webChromeClient = WebChromeClient()
         }
 
-        setContentView(webView)
-        webView.loadUrl(targetHost)
+        // Кнопка быстрой смены адреса роутера в правом верхнем углу
+        val settingsBtn = ImageButton(this).apply {
+            val size = (36 * resources.displayMetrics.density).toInt()
+            layoutParams = FrameLayout.LayoutParams(size, size).apply {
+                gravity = android.view.Gravity.TOP or android.view.Gravity.END
+                topMargin = (10 * resources.displayMetrics.density).toInt()
+                rightMargin = (10 * resources.displayMetrics.density).toInt()
+            }
+            setImageResource(android.R.drawable.ic_menu_preferences)
+            setBackgroundColor(0x33000000)
+            setOnClickListener { showSettingsDialog() }
+        }
+
+        rootLayout.addView(webView)
+        rootLayout.addView(settingsBtn)
+        setContentView(rootLayout)
+
+        webView.loadUrl(currentUrl)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -65,11 +93,33 @@ class MainActivity : ComponentActivity() {
         })
     }
 
+    private fun showSettingsDialog() {
+        val prefs = getSharedPreferences("hydra_app_prefs", Context.MODE_PRIVATE)
+        val currentUrl = prefs.getString("custom_url", defaultUrl) ?: defaultUrl
+
+        val input = EditText(this).apply {
+            setText(currentUrl)
+            setSelection(text.length)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Адрес HydraRoute")
+            .setMessage("Укажите IP и порт роутера:")
+            .setView(input)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val newUrl = input.text.toString().trim()
+                prefs.edit().putString("custom_url", newUrl).apply()
+                webView.loadUrl(newUrl)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun injectOptimizationCode(view: WebView?) {
         val customCss = """
-            /* Увеличение кнопок управления (bal, mux, via, noise, frag, rfp) */
+            /* Увеличение функциональных кнопок и переключателей */
             .cbi-button, button, input[type='button'], .btn {
-                min-height: 40px !important;
+                min-height: 42px !important;
                 min-width: 44px !important;
                 padding: 6px 12px !important;
                 font-size: 14px !important;
@@ -77,29 +127,22 @@ class MainActivity : ComponentActivity() {
                 touch-action: manipulation !important;
             }
 
-            /* Увеличение бейджей и статусов */
-            .badge, span[class*='badge'] {
-                font-size: 13px !important;
-                padding: 5px 8px !important;
-            }
-
             /* Кнопки ручного перемещения вверх/вниз */
             .mobile-order-btn {
                 display: inline-block !important;
-                padding: 4px 10px !important;
-                margin-right: 4px !important;
+                padding: 6px 12px !important;
+                margin-right: 6px !important;
                 background-color: #2a3b50 !important;
                 color: #00d2ff !important;
                 border: 1px solid #00d2ff !important;
-                border-radius: 4px !important;
+                border-radius: 6px !important;
                 font-weight: bold !important;
-                font-size: 14px !important;
+                font-size: 16px !important;
             }
         """.trimIndent().replace("\n", " ")
 
         val jsScript = """
             (function() {
-                // 1. Инъекция стилей
                 var style = document.getElementById('mobile-hydra-style');
                 if (!style) {
                     style = document.createElement('style');
@@ -108,7 +151,6 @@ class MainActivity : ComponentActivity() {
                     document.head.appendChild(style);
                 }
 
-                // 2. Внедрение кнопок перемещения ▲ и ▼ перед элементами сортировки
                 function patchSortRows() {
                     var rows = document.querySelectorAll('.modal-dialog tr, .modal tr, table tr');
                     rows.forEach(function(row) {
