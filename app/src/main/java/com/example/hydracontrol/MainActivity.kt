@@ -4,18 +4,19 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Context
 import android.os.Bundle
+import android.text.InputType
 import android.view.ViewGroup
 import android.webkit.*
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
-    // Порт 2000 для HydraRoute
     private val defaultUrl = "http://192.168.2.1:2000"
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -57,13 +58,13 @@ class MainActivity : ComponentActivity() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     injectOptimizationCode(view)
+                    handleAutoLogin(view)
                 }
             }
 
             webChromeClient = WebChromeClient()
         }
 
-        // Кнопка быстрой смены адреса роутера в правом верхнем углу
         val settingsBtn = ImageButton(this).apply {
             val size = (36 * resources.displayMetrics.density).toInt()
             layoutParams = FrameLayout.LayoutParams(size, size).apply {
@@ -96,28 +97,100 @@ class MainActivity : ComponentActivity() {
     private fun showSettingsDialog() {
         val prefs = getSharedPreferences("hydra_app_prefs", Context.MODE_PRIVATE)
         val currentUrl = prefs.getString("custom_url", defaultUrl) ?: defaultUrl
+        val currentLogin = prefs.getString("auth_login", "root") ?: "root"
+        val currentPass = prefs.getString("auth_pass", "") ?: ""
 
-        val input = EditText(this).apply {
-            setText(currentUrl)
-            setSelection(text.length)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (16 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
         }
 
+        val inputUrl = EditText(this).apply {
+            hint = "Адрес (http://192.168.2.1:2000)"
+            setText(currentUrl)
+        }
+        val inputLogin = EditText(this).apply {
+            hint = "Логин"
+            setText(currentLogin)
+        }
+        val inputPass = EditText(this).apply {
+            hint = "Пароль"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(currentPass)
+        }
+
+        container.addView(inputUrl)
+        container.addView(inputLogin)
+        container.addView(inputPass)
+
         AlertDialog.Builder(this)
-            .setTitle("Адрес HydraRoute")
-            .setMessage("Укажите IP и порт роутера:")
-            .setView(input)
+            .setTitle("Настройки подключения")
+            .setView(container)
             .setPositiveButton("Сохранить") { _, _ ->
-                val newUrl = input.text.toString().trim()
-                prefs.edit().putString("custom_url", newUrl).apply()
+                val newUrl = inputUrl.text.toString().trim()
+                val newLogin = inputLogin.text.toString().trim()
+                val newPass = inputPass.text.toString()
+
+                prefs.edit()
+                    .putString("custom_url", newUrl)
+                    .putString("auth_login", newLogin)
+                    .putString("auth_pass", newPass)
+                    .apply()
+
                 webView.loadUrl(newUrl)
             }
             .setNegativeButton("Отмена", null)
             .show()
     }
 
+    private fun handleAutoLogin(view: WebView?) {
+        val prefs = getSharedPreferences("hydra_app_prefs", Context.MODE_PRIVATE)
+        val login = prefs.getString("auth_login", "") ?: ""
+        val pass = prefs.getString("auth_pass", "") ?: ""
+
+        if (login.isEmpty() && pass.isEmpty()) return
+
+        val escapedLogin = login.replace("\"", "\\\"")
+        val escapedPass = pass.replace("\"", "\\\"")
+
+        // Скрипт поиска инпутов авторизации HydraRoute / LuCI
+        val autoLoginJs = """
+            (function() {
+                var passInput = document.querySelector('input[type="password"]');
+                if (!passInput) return;
+
+                // Находим текстовое поле логина перед полем пароля
+                var form = passInput.closest('form') || document;
+                var userInput = form.querySelector('input[type="text"]') || form.querySelector('input[name*="user"]') || form.querySelector('input[name*="login"]');
+
+                if (userInput && userInput.value === "") {
+                    userInput.value = "$escapedLogin";
+                    userInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    userInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+
+                if (passInput && passInput.value === "") {
+                    passInput.value = "$escapedPass";
+                    passInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    passInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+
+                // Нажатие кнопки 'Войти'
+                var submitBtn = form.querySelector('button[type="submit"]') || form.querySelector('input[type="submit"]') || Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Войти'));
+                if (submitBtn && userInput && userInput.value !== "" && passInput && passInput.value !== "") {
+                    setTimeout(function() {
+                        submitBtn.click();
+                    }, 300);
+                }
+            })();
+        """.trimIndent()
+
+        view?.evaluateJavascript(autoLoginJs, null)
+    }
+
     private fun injectOptimizationCode(view: WebView?) {
         val customCss = """
-            /* Увеличение функциональных кнопок и переключателей */
             .cbi-button, button, input[type='button'], .btn {
                 min-height: 42px !important;
                 min-width: 44px !important;
@@ -127,7 +200,6 @@ class MainActivity : ComponentActivity() {
                 touch-action: manipulation !important;
             }
 
-            /* Кнопки ручного перемещения вверх/вниз */
             .mobile-order-btn {
                 display: inline-block !important;
                 padding: 6px 12px !important;
